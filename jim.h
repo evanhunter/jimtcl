@@ -139,6 +139,7 @@ extern "C" {
 #define JIM_EXIT 6
 /* The following are internal codes and should never been seen/used */
 #define JIM_EVAL 7
+#define JIM_TRACEVARUNSET 8
 
 #define JIM_MAX_CALLFRAME_DEPTH 1000 /* default max nesting depth for procs */
 #define JIM_MAX_EVAL_DEPTH 2000 /* default max nesting depth for eval */
@@ -459,6 +460,10 @@ typedef struct Jim_CallFrame {
 typedef struct Jim_Var {
     Jim_Obj *objPtr;
     struct Jim_CallFrame *linkFramePtr;
+    struct Jim_Obj* traceCmd;
+    char traceShortCmd;
+    int traceRecurseDisable;
+    char* traceVarUnsetFlag;
 } Jim_Var;
 
 /* The cmd structure. */
