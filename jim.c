@@ -142,6 +142,13 @@ static int JimValidName(Jim_Interp *interp, const char *type, Jim_Obj *nameObjPt
 static void JimPrngSeed(Jim_Interp *interp, unsigned char *seed, int seedLen);
 static void JimRandomBytes(Jim_Interp *interp, void *dest, unsigned int len);
 
+#define TRACE_VARIABLE_ARRAY  (0x1)
+#define TRACE_VARIABLE_READ   (0x2)
+#define TRACE_VARIABLE_WRITE  (0x4)
+#define TRACE_VARIABLE_UNSET  (0x8)
+
+
+static int JimTraceEvent(Jim_Interp *interp, Jim_Var * var, Jim_Obj* nameObjPtr, Jim_Obj* keyObjPtr, unsigned int event);
 
 /* Fast access to the int (wide) value of an object which is known to be of int type */
 #define JimWideValue(objPtr) (objPtr)->internalRep.wideValue
@@ -3756,6 +3763,10 @@ static void JimDecrCmdRefCount(Jim_Interp *interp, Jim_Cmd *cmdPtr)
  * Keys are dynamic allocated strings, Values are Jim_Var structures. */
 static void JimVariablesHTValDestructor(void *interp, void *val)
 {
+    if (((Jim_Var *)val)->traceCmd) {
+        Jim_DecrRefCount(interp, ((Jim_Var *)val)->traceCmd);
+        ((Jim_Var *)val)->traceCmd = NULL;
+    }
     Jim_DecrRefCount(interp, ((Jim_Var *)val)->objPtr);
     Jim_Free(val);
 }
@@ -3965,6 +3976,7 @@ static int JimCreateProcedureStatics(Jim_Interp *interp, Jim_Cmd *cmdPtr, Jim_Ob
             varPtr->objPtr = initObjPtr;
             Jim_IncrRefCount(initObjPtr);
             varPtr->linkFramePtr = NULL;
+            varPtr->traceCmd = NULL;
             if (Jim_AddHashEntry(cmdPtr->u.proc.staticVars,
                 Jim_String(nameObjPtr), varPtr) != JIM_OK) {
                 Jim_SetResultFormatted(interp,
@@ -4378,6 +4390,7 @@ static Jim_Var *JimCreateVariable(Jim_Interp *interp, Jim_Obj *nameObjPtr, Jim_O
     var->objPtr = valObjPtr;
     Jim_IncrRefCount(valObjPtr);
     var->linkFramePtr = NULL;
+    var->traceCmd = NULL;
 
     name = Jim_String(nameObjPtr);
     if (name[0] == ':' && name[1] == ':') {
@@ -4432,6 +4445,11 @@ int Jim_SetVariable(Jim_Interp *interp, Jim_Obj *nameObjPtr, Jim_Obj *valObjPtr)
                 Jim_IncrRefCount(valObjPtr);
                 Jim_DecrRefCount(interp, var->objPtr);
                 var->objPtr = valObjPtr;
+                if (var->traceCmd) {
+                    if (JimTraceEvent(interp, var, nameObjPtr, NULL, TRACE_VARIABLE_WRITE) != JIM_OK) {
+                        return JIM_ERR;
+                    }
+                }
             }
             else {                  /* Else handle the link */
                 Jim_CallFrame *savedCallFrame;
@@ -4589,6 +4607,20 @@ Jim_Obj *Jim_GetVariable(Jim_Interp *interp, Jim_Obj *nameObjPtr, int flags)
         case JIM_OK:{
                 Jim_Var *varPtr = nameObjPtr->internalRep.varValue.varPtr;
 
+                if (varPtr && varPtr->traceCmd) {
+                    int eventResult = JimTraceEvent(interp, varPtr, nameObjPtr, NULL, TRACE_VARIABLE_READ );
+                    if (eventResult == JIM_TRACEVARUNSET) {
+                        /* Variable being accessed was unset during trace event function */
+                        return NULL;
+                    }
+                    if (eventResult != JIM_OK) {
+                        if (flags & JIM_ERRMSG) {
+                            Jim_SetResultFormatted(interp, "Error in trace event (Jim_GetVariable)", -1);
+                            return NULL;
+                        }
+                    }
+                }
+
                 if (varPtr->linkFramePtr == NULL) {
                     return varPtr->objPtr;
                 }
@@ -4618,6 +4650,44 @@ Jim_Obj *Jim_GetVariable(Jim_Interp *interp, Jim_Obj *nameObjPtr, int flags)
     }
     return NULL;
 }
+
+
+Jim_Var *Jim_GetJimVar(Jim_Interp *interp, Jim_Obj *nameObjPtr, int flags)
+{
+    switch (SetVariableFromAny(interp, nameObjPtr)) {
+        case JIM_OK:{
+                Jim_Var *varPtr = nameObjPtr->internalRep.varValue.varPtr;
+
+                if (varPtr->linkFramePtr == NULL) {
+                    return varPtr;
+                }
+                else {
+                    Jim_Var *newVarPtr;
+
+                    /* The variable is a link? Resolve it. */
+                    Jim_CallFrame *savedCallFrame = interp->framePtr;
+
+                    interp->framePtr = varPtr->linkFramePtr;
+                    newVarPtr = Jim_GetJimVar(interp, varPtr->objPtr, flags);
+                    interp->framePtr = savedCallFrame;
+                    if (newVarPtr) {
+                        return newVarPtr;
+                    }
+                    /* Error, so fall through to the error message */
+                }
+            }
+            break;
+
+        case JIM_DICT_SUGAR:
+            /* [dict] syntax sugar. */
+            return NULL;
+    }
+    if (flags & JIM_ERRMSG) {
+        Jim_SetResultFormatted(interp, "can't read \"%#s\": no such variable", nameObjPtr);
+    }
+    return NULL;
+}
+
 
 Jim_Obj *Jim_GetGlobalVariable(Jim_Interp *interp, Jim_Obj *nameObjPtr, int flags)
 {
@@ -4681,6 +4751,13 @@ int Jim_UnsetVariable(Jim_Interp *interp, Jim_Obj *nameObjPtr, int flags)
             interp->framePtr = framePtr;
         }
         else {
+            if (varPtr->traceCmd) {
+                Jim_DecrRefCount(interp, varPtr->traceCmd);
+                varPtr->traceCmd = NULL;
+                if (varPtr->traceVarUnsetFlag) {
+                    *varPtr->traceVarUnsetFlag = 1;
+                }
+            }
             const char *name = Jim_String(nameObjPtr);
             if (nameObjPtr->internalRep.varValue.global) {
                 name += 2;
@@ -4748,9 +4825,24 @@ static int JimDictSugarSet(Jim_Interp *interp, Jim_Obj *objPtr, Jim_Obj *valObjP
     int err;
 
     SetDictSubstFromAny(interp, objPtr);
+    Jim_Var* varPtr = Jim_GetJimVar(interp, objPtr->internalRep.dictSubstValue.varNameObjPtr, JIM_UNSHARED);
+
+    if (varPtr) {
+        varPtr->traceRecurseDisable++;
+    }
 
     err = Jim_SetDictKeysVector(interp, objPtr->internalRep.dictSubstValue.varNameObjPtr,
         &objPtr->internalRep.dictSubstValue.indexObjPtr, 1, valObjPtr, JIM_MUSTEXIST);
+
+    if (varPtr) {
+        varPtr->traceRecurseDisable--;
+    }
+
+    if (varPtr  && varPtr->traceCmd) {
+        if (JimTraceEvent(interp, varPtr, objPtr->internalRep.dictSubstValue.varNameObjPtr, objPtr->internalRep.dictSubstValue.indexObjPtr, TRACE_VARIABLE_WRITE) != JIM_OK) {
+            return JIM_ERR;
+        }
+    }
 
     if (err == JIM_OK) {
         /* Don't keep an extra ref to the result */
@@ -4785,8 +4877,24 @@ static Jim_Obj *JimDictExpandArrayVariable(Jim_Interp *interp, Jim_Obj *varObjPt
     Jim_Obj *resObjPtr = NULL;
     int ret;
 
+    Jim_Var* varPtr = Jim_GetJimVar(interp, varObjPtr, JIM_UNSHARED);
+    if (varPtr) {
+        varPtr->traceRecurseDisable++;
+    }
+
+    if (varPtr && varPtr->traceCmd) {
+        varPtr->traceRecurseDisable--;
+        if (JimTraceEvent(interp, varPtr,  varObjPtr, keyObjPtr, TRACE_VARIABLE_READ) != JIM_OK) {
+            Jim_SetResultFormatted(interp, "Error in trace event (JimDictExpandArrayVariable)", -1);
+            return NULL;
+        }
+        varPtr->traceRecurseDisable++;
+    }
+
     dictObjPtr = Jim_GetVariable(interp, varObjPtr, JIM_ERRMSG);
     if (!dictObjPtr) {
+        if (varPtr)
+            varPtr->traceRecurseDisable--;
         return NULL;
     }
 
@@ -4801,6 +4909,9 @@ static Jim_Obj *JimDictExpandArrayVariable(Jim_Interp *interp, Jim_Obj *varObjPt
         Jim_SetVariable(interp, varObjPtr, Jim_DuplicateObj(interp, dictObjPtr));
     }
 
+    if (varPtr) {
+        varPtr->traceRecurseDisable--;
+    }
     return resObjPtr;
 }
 
@@ -4809,9 +4920,24 @@ static Jim_Obj *JimDictSugarGet(Jim_Interp *interp, Jim_Obj *objPtr, int flags)
 {
     SetDictSubstFromAny(interp, objPtr);
 
-    return JimDictExpandArrayVariable(interp,
+    Jim_Var* varPtr = Jim_GetJimVar(interp, objPtr->internalRep.dictSubstValue.varNameObjPtr, JIM_UNSHARED);
+    if (varPtr && varPtr->traceCmd) {
+        if (JimTraceEvent(interp, varPtr,  objPtr->internalRep.dictSubstValue.varNameObjPtr, objPtr->internalRep.dictSubstValue.indexObjPtr, TRACE_VARIABLE_READ) != JIM_OK) {
+            Jim_SetResultFormatted(interp, "Error in trace event (JimDictSugarGet)", -1);
+            return NULL;
+        }
+    }
+    if (varPtr) {
+        varPtr->traceRecurseDisable++;
+    }
+
+    Jim_Obj * outputObj = JimDictExpandArrayVariable(interp,
         objPtr->internalRep.dictSubstValue.varNameObjPtr,
         objPtr->internalRep.dictSubstValue.indexObjPtr, flags);
+    if (varPtr) {
+        varPtr->traceRecurseDisable--;
+    }
+    return outputObj;
 }
 
 /* --------- $var(INDEX) substitution, using a specialized object ----------- */
@@ -5000,6 +5126,10 @@ static void JimFreeCallFrame(Jim_Interp *interp, Jim_CallFrame *cf, int action)
                 Jim_HashEntry *nextEntry = he->next;
                 Jim_Var *varPtr = Jim_GetHashEntryVal(he);
 
+                if (varPtr->traceCmd) {
+                    Jim_DecrRefCount(interp, varPtr->traceCmd);
+                    varPtr->traceCmd = NULL;
+                }
                 Jim_DecrRefCount(interp, varPtr->objPtr);
                 Jim_Free(Jim_GetHashEntryKey(he));
                 Jim_Free(varPtr);
@@ -13251,6 +13381,150 @@ static int Jim_UpcallCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const *a
     }
 }
 
+
+/* [trace] */
+static int Jim_TraceCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
+{
+    if (argc < 2) {
+        Jim_WrongNumArgs(interp, 1, argv, "add variable name opList command");
+        return JIM_ERR;
+    }
+
+	if (((Jim_CompareStringImmediate(interp, argv[1], "add")) && (argc >= 3) &&
+	         (Jim_CompareStringImmediate(interp, argv[2], "variable"))) ||
+	        (Jim_CompareStringImmediate(interp, argv[1], "variable"))) {
+	    int varnameArg;
+	    if (Jim_CompareStringImmediate(interp, argv[1], "variable")) {
+	        varnameArg = 2;
+	    }
+	    else {
+            varnameArg = 3;
+        }
+	    if (varnameArg+2 >= argc) {
+	        Jim_WrongNumArgs(interp, 1, argv, "add variable name opList command");
+	        return JIM_ERR;
+	    }
+
+	    Jim_Var* varPtr = Jim_GetJimVar(interp, argv[varnameArg], JIM_UNSHARED);
+	    if (!varPtr) {
+	        /* variable doesn't exist - create it. */
+	        Jim_Obj * tmpStrObj = Jim_NewStringObj(interp, "0", -1);
+	        Jim_IncrRefCount(tmpStrObj);
+	        Jim_SetVariable(interp, argv[varnameArg], tmpStrObj);
+            Jim_DecrRefCount(interp, tmpStrObj);
+            varPtr = Jim_GetJimVar(interp, argv[varnameArg], JIM_UNSHARED);
+            if (!varPtr) {
+                Jim_SetResultString(interp, "Could not create trace variable", -1);
+                return JIM_ERR;
+            }
+	    }
+        if (varnameArg == 2) {
+            varPtr->traceShortCmd = 1;
+        }
+        else {
+            varPtr->traceShortCmd = 0;
+        }
+
+        if (varPtr->traceCmd) {
+            Jim_DecrRefCount(interp, varPtr->traceCmd);
+        }
+
+        varPtr->traceCmd = argv[varnameArg+2];
+        Jim_IncrRefCount(varPtr->traceCmd);
+        varPtr->traceRecurseDisable = 0;
+        varPtr->traceVarUnsetFlag = NULL;
+
+	}
+	else {
+	    Jim_SetResultString(interp, "Only add variable currently supported for trace command", -1);
+	    return JIM_ERR;
+	}
+
+    return JIM_OK;
+}
+
+
+
+
+static int JimTraceEvent(Jim_Interp *interp, Jim_Var * var, Jim_Obj* nameObjPtr, Jim_Obj* keyObjPtr, unsigned int event)
+{
+    int ret;
+    char opStr[sizeof("arrayreadwriteunset")];
+    char * opStrPtr = opStr;
+
+    if (var->traceRecurseDisable > 0) {
+        /* Trace recursion - traced variable modified in trace function - ignore */
+        return JIM_OK;
+    }
+
+    var->traceRecurseDisable++;
+
+    Jim_Obj * obj = Jim_DuplicateObj(interp, var->traceCmd);
+    Jim_IncrRefCount(obj);
+    Jim_AppendString(interp, obj, " ", 1);
+    Jim_AppendObj(interp, obj, nameObjPtr);
+    Jim_AppendString(interp, obj, " ", 1);
+    if (keyObjPtr) {
+        Jim_AppendObj(interp, obj, keyObjPtr);
+    }
+    else {
+        Jim_AppendString(interp, obj, "\"\"", 2);
+    }
+    Jim_AppendString(interp, obj, " ", 1);
+
+    if (var->traceShortCmd) {
+        if (event & TRACE_VARIABLE_ARRAY) {
+            opStrPtr += sprintf(opStrPtr, "a");
+        }
+        if (event & TRACE_VARIABLE_READ) {
+            opStrPtr += sprintf(opStrPtr, "r");
+        }
+        if (event & TRACE_VARIABLE_WRITE) {
+            opStrPtr += sprintf(opStrPtr, "w");
+        }
+        if (event & TRACE_VARIABLE_UNSET) {
+            opStrPtr += sprintf(opStrPtr, "u");
+        }
+
+    }
+    else {
+        if (event & TRACE_VARIABLE_ARRAY) {
+            opStrPtr += sprintf(opStrPtr, "array");
+        }
+        if (event & TRACE_VARIABLE_READ) {
+            opStrPtr += sprintf(opStrPtr, "read");
+        }
+        if (event & TRACE_VARIABLE_WRITE) {
+            opStrPtr += sprintf(opStrPtr, "write");
+        }
+        if (event & TRACE_VARIABLE_UNSET) {
+            opStrPtr += sprintf(opStrPtr, "unset");
+        }
+    }
+    Jim_Obj * opStrObj = Jim_NewStringObj(interp, opStr, -1);
+    Jim_IncrRefCount(opStrObj);
+    Jim_AppendObj(interp, obj, opStrObj);
+    Jim_DecrRefCount(interp, opStrObj);
+
+    char tmpVarUnsetFlag = 0;
+
+    var->traceVarUnsetFlag = &tmpVarUnsetFlag;
+    ret = Jim_EvalObj(interp,obj);
+    var->traceVarUnsetFlag = NULL;
+    Jim_DecrRefCount(interp, obj);
+
+    if (tmpVarUnsetFlag) {
+        /* variable being traced was deleted by trace function! */
+        return JIM_TRACEVARUNSET;
+    }
+    var->traceRecurseDisable--;
+
+    return ret;
+
+}
+
+
+
 /* [apply] */
 static int Jim_ApplyCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
@@ -15250,6 +15524,7 @@ static const struct {
     {"local", Jim_LocalCoreCommand},
     {"upcall", Jim_UpcallCoreCommand},
     {"apply", Jim_ApplyCoreCommand},
+	{"trace", Jim_TraceCoreCommand},
     {NULL, NULL},
 };
 
