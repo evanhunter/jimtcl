@@ -101,7 +101,7 @@ Win32_ShellExecute(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
     GetCurrentDirectoryA(MAX_PATH + 1, cwd);
     if (objc == 4)
         parm = Jim_String(objv[3]);
-    r = (int)ShellExecuteA(NULL, verb, file, parm, cwd, SW_SHOWNORMAL);
+    r = (int)(jim_wide)ShellExecuteA(NULL, verb, file, parm, cwd, SW_SHOWNORMAL);
     if (r < 33)
         Jim_SetResult(interp,
             Win32ErrorObj(interp, "ShellExecute", GetLastError()));
@@ -131,7 +131,7 @@ Win32_FindWindow(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
             Win32ErrorObj(interp, "FindWindow", GetLastError()));
         r = JIM_ERR;
     } else {
-        Jim_SetResult(interp, Jim_NewIntObj(interp, (long)hwnd));
+        Jim_SetResult(interp, Jim_NewIntObj(interp, (jim_wide)hwnd));
     }
     return r;
 }
@@ -140,13 +140,13 @@ Win32_FindWindow(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
 static int
 Win32_CloseWindow(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
 {
-    long hwnd;
+    jim_wide hwnd;
 
     if (objc != 2) {
         Jim_WrongNumArgs(interp, 1, objv, "?windowHandle?");
         return JIM_ERR;
     }
-    if (Jim_GetLong(interp, objv[1], &hwnd) != JIM_OK)
+    if (Jim_GetWide(interp, objv[1], &hwnd) != JIM_OK)
         return JIM_ERR;
     if (!CloseWindow((HWND)hwnd)) {
         Jim_SetResult(interp,
@@ -159,7 +159,7 @@ Win32_CloseWindow(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
 static int
 Win32_GetActiveWindow(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
 {
-    Jim_SetResult(interp, Jim_NewIntObj(interp, (DWORD)GetActiveWindow()));
+    Jim_SetResult(interp, Jim_NewIntObj(interp, (jim_wide)GetActiveWindow()));
     return JIM_OK;
 }
 
@@ -181,7 +181,7 @@ Win32_SetActiveWindow(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
                 Win32ErrorObj(interp, "SetActiveWindow", GetLastError()));
             r = JIM_ERR;
         } else {
-            Jim_SetResult(interp, Jim_NewIntObj(interp, (long)old));
+            Jim_SetResult(interp, Jim_NewIntObj(interp, (jim_wide)old));
         }
     }
     return r;
@@ -348,7 +348,7 @@ Win32_GetSystemTime(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
     JIMADD(Milliseconds);
 #undef JIMADD
 
-    Jim_SetResult(interp, Jim_NewListObj(interp, a, n));
+    Jim_SetResult(interp, Jim_NewListObj(interp, a, (int)n));
     return JIM_OK;
 }
 
@@ -387,7 +387,7 @@ Win32_GetPerformanceInfo(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
     JIMADD(ThreadCount);
 #undef JIMADD
 
-    Jim_SetResult(interp, Jim_NewListObj(interp, a, n));
+    Jim_SetResult(interp, Jim_NewListObj(interp, a, (int)n));
     return JIM_OK;
 }
 #endif
@@ -428,7 +428,7 @@ Win32_GetModuleHandle(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
             Win32ErrorObj(interp, "GetModuleHandle", GetLastError()));
         return JIM_ERR;
     }
-    Jim_SetResult(interp, Jim_NewIntObj(interp, (unsigned long)hModule));
+    Jim_SetResult(interp, Jim_NewIntObj(interp, (jim_wide)hModule));
     return JIM_OK;
 }
 
@@ -446,7 +446,7 @@ Win32_LoadLibrary(Jim_Interp *interp, int objc, Jim_Obj * const *objv)
             Win32ErrorObj(interp, "LoadLibrary", GetLastError()));
         return JIM_ERR;
     }
-    Jim_SetResult(interp, Jim_NewIntObj(interp, (unsigned long)hLib));
+    Jim_SetResult(interp, Jim_NewIntObj(interp, (jim_wide)hLib));
     return JIM_OK;
 }
 

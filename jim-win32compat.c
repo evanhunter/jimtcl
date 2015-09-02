@@ -1,5 +1,6 @@
 #include "jim.h"
 #include "jimautoconf.h"
+#include <errno.h>
 
 #if defined(_WIN32) || defined(WIN32)
 #ifndef STRICT
@@ -46,7 +47,7 @@ int gettimeofday(struct timeval *tv, void *unused)
     struct _timeb tb;
 
     _ftime(&tb);
-    tv->tv_sec = tb.time;
+    tv->tv_sec = (long)tb.time;
     tv->tv_usec = tb.millitm * 1000;
 
     return 0;
@@ -75,7 +76,7 @@ DIR *opendir(const char *name)
             strchr("/\\", name[base_length - 1]) ? "*" : "/*";
 
         if ((dir = (DIR *) Jim_Alloc(sizeof *dir)) != 0 &&
-            (dir->name = (char *)Jim_Alloc(base_length + strlen(all) + 1)) != 0) {
+            (dir->name = (char *)Jim_Alloc((int)(base_length + strlen(all) + 1))) != 0) {
             strcat(strcpy(dir->name, name), all);
 
             if ((dir->handle = (long)_findfirst(dir->name, &dir->info)) != -1)
@@ -129,4 +130,18 @@ struct dirent *readdir(DIR * dir)
     return result;
 }
 #endif
+#endif
+
+#ifdef _MSC_VER
+/* TODO: Implement Signals support for MSVC */
+const char *Jim_SignalId(int sig)
+{
+	return "";
+}
+const char *Jim_SignalName(int sig)
+{
+	return "";
+}
+
+
 #endif

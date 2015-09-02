@@ -42,20 +42,22 @@
 #include <jim-eventloop.h>
 
 /* POSIX includes */
-#include <sys/time.h>
 #include <sys/types.h>
 #include <string.h>
-#include <unistd.h>
 #include <errno.h>
+#include "jim-win32compat.h"
 
 #if defined(__MINGW32__)
 #include <windows.h>
 #include <winsock.h>
-#define msleep Sleep
+#include <time.h>
+#define msleep(ms) Sleep( (DWORD)(ms))
 #else
 #ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
 #endif
+#include <sys/time.h>
+#include <unistd.h>
 
 #ifndef HAVE_USLEEP
 /* XXX: Implement this in terms of select() or nanosleep() */
@@ -205,7 +207,7 @@ jim_wide Jim_CreateTimeHandler(Jim_Interp *interp, jim_wide milliseconds,
 
     te = Jim_Alloc(sizeof(*te));
     te->id = id;
-    te->initialms = milliseconds;
+    te->initialms = (long)milliseconds;
     te->when = JimGetTime(eventLoop) + milliseconds;
     te->timeProc = proc;
     te->finalizerProc = finalizerProc;
@@ -404,7 +406,7 @@ int Jim_ProcessEvents(Jim_Interp *interp, int flags)
 
         if (sleep_ms >= 0) {
             tvp = &tv;
-            tvp->tv_sec = sleep_ms / 1000;
+            tvp->tv_sec = (long)sleep_ms / 1000;
             tvp->tv_usec = 1000 * (sleep_ms % 1000);
         }
 

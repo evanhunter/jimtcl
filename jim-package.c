@@ -2,6 +2,7 @@
 
 #include "jimautoconf.h"
 #include <jim-subcmd.h>
+#include "jim-win32compat.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>

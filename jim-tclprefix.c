@@ -105,7 +105,7 @@ static int Jim_TclPrefixCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const
             table[i] = NULL;
 
             ret = Jim_GetEnum(interp, stringObj, table, &i, messageObj ? Jim_String(messageObj) : NULL, flags);
-            Jim_Free(table);
+            Jim_Free((void*)table);
             if (ret == JIM_OK) {
                 Jim_ListIndex(interp, tableObj, i, &objPtr, JIM_NONE);
                 Jim_SetResult(interp, objPtr);
@@ -157,11 +157,12 @@ static int Jim_TclPrefixCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const
             else if (Jim_ListLength(interp, argv[2])) {
                 const char *longeststr = NULL;
                 int longestlen = 0;
+                int i;
+                int listlen;
 
                 stringObj = argv[3];
 
-                int i;
-                int listlen = Jim_ListLength(interp, argv[2]);
+                listlen = Jim_ListLength(interp, argv[2]);
                 for (i = 0; i < listlen; i++) {
                     Jim_Obj *valObj = Jim_ListGetIndex(interp, argv[2], i);
 

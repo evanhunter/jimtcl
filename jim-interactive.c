@@ -5,11 +5,15 @@
 #include <jim.h>
 
 #ifdef USE_LINENOISE
+#ifdef HAVE_UNISTD_H
 #include <unistd.h>
+#endif
 #include "linenoise.h"
 #else
 #define MAX_LINE_LEN 512
 #endif
+
+#include "jim-win32compat.h"
 
 /**
  * Returns an allocated line, or NULL if EOF.
@@ -80,7 +84,7 @@ int Jim_InteractivePrompt(Jim_Interp *interp)
 
     home = getenv("HOME");
     if (home && isatty(STDIN_FILENO)) {
-        int history_len = strlen(home) + sizeof("/.jim_history");
+        int history_len = (int)(strlen(home) + sizeof("/.jim_history"));
         history_file = Jim_Alloc(history_len);
         snprintf(history_file, history_len, "%s/.jim_history", home);
         Jim_HistoryLoad(history_file);

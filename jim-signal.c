@@ -6,11 +6,16 @@
 #include <signal.h>
 #include <string.h>
 #include <ctype.h>
-#include <unistd.h>
 
 #include "jimautoconf.h"
+
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
+
 #include <jim-subcmd.h>
 #include <jim-signal.h>
+#include "jim-win32compat.h"
 
 #define MAX_SIGNALS_WIDE (sizeof(jim_wide) * 8)
 #if defined(NSIG)
@@ -49,25 +54,23 @@ static void signal_init_names(void)
 #define SET_SIG_NAME(SIG) siginfo[SIG].name = #SIG
 
     SET_SIG_NAME(SIGABRT);
-    SET_SIG_NAME(SIGALRM);
+    SET_SIG_NAME(SIGFPE);
+    SET_SIG_NAME(SIGILL);
+    SET_SIG_NAME(SIGINT);
+    SET_SIG_NAME(SIGSEGV);
+    SET_SIG_NAME(SIGTERM);
+#ifndef _MSC_VER
+	SET_SIG_NAME(SIGALRM);
     SET_SIG_NAME(SIGBUS);
     SET_SIG_NAME(SIGCHLD);
     SET_SIG_NAME(SIGCONT);
-    SET_SIG_NAME(SIGFPE);
-    SET_SIG_NAME(SIGHUP);
-    SET_SIG_NAME(SIGILL);
-    SET_SIG_NAME(SIGINT);
-#ifdef SIGIO
-    SET_SIG_NAME(SIGIO);
-#endif
+	SET_SIG_NAME(SIGHUP);
     SET_SIG_NAME(SIGKILL);
     SET_SIG_NAME(SIGPIPE);
     SET_SIG_NAME(SIGPROF);
     SET_SIG_NAME(SIGQUIT);
-    SET_SIG_NAME(SIGSEGV);
     SET_SIG_NAME(SIGSTOP);
     SET_SIG_NAME(SIGSYS);
-    SET_SIG_NAME(SIGTERM);
     SET_SIG_NAME(SIGTRAP);
     SET_SIG_NAME(SIGTSTP);
     SET_SIG_NAME(SIGTTIN);
@@ -79,6 +82,10 @@ static void signal_init_names(void)
     SET_SIG_NAME(SIGWINCH);
     SET_SIG_NAME(SIGXCPU);
     SET_SIG_NAME(SIGXFSZ);
+#endif /* _MSC_VER */
+#ifdef SIGIO
+    SET_SIG_NAME(SIGIO);
+#endif
 #ifdef SIGPWR
     SET_SIG_NAME(SIGPWR);
 #endif

@@ -25,6 +25,7 @@
 
 #include "jimautoconf.h"
 #include <jim.h>
+#include <jim-signal.h>
 
 #if (!defined(HAVE_VFORK) || !defined(HAVE_WAITPID)) && !defined(__MINGW32__)
 /* Poor man's implementation of exec with system()
@@ -198,7 +199,7 @@ static int JimAppendStreamToString(Jim_Interp *interp, fdtype fd, Jim_Obj *strOb
     }
 
     while (1) {
-        int retval = fread(buf, 1, sizeof(buf), fh);
+        int retval = (int)fread(buf, 1, sizeof(buf), fh);
         if (retval > 0) {
             ret = 1;
             Jim_AppendString(interp, strObj, buf, retval);
@@ -322,7 +323,7 @@ static int JimCheckWaitStatus(Jim_Interp *interp, pidtype pid, int waitStatus, i
 
     if (WIFEXITED(waitStatus)) {
         Jim_ListAppendElement(interp, errorCode, Jim_NewStringObj(interp, "CHILDSTATUS", -1));
-        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, (long)pid));
+        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, (jim_wide)pid));
         Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, WEXITSTATUS(waitStatus)));
     }
     else {
@@ -346,7 +347,7 @@ static int JimCheckWaitStatus(Jim_Interp *interp, pidtype pid, int waitStatus, i
         if (child_siginfo) {
             Jim_SetResultFormatted(interp, "%#schild %s by signal %s\n", Jim_GetResult(interp), action, Jim_SignalId(WTERMSIG(waitStatus)));
         }
-        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, pid));
+        Jim_ListAppendElement(interp, errorCode, Jim_NewIntObj(interp, (jim_wide)pid));
         Jim_ListAppendElement(interp, errorCode, Jim_NewStringObj(interp, Jim_SignalId(WTERMSIG(waitStatus)), -1));
         Jim_ListAppendElement(interp, errorCode, Jim_NewStringObj(interp, Jim_SignalName(WTERMSIG(waitStatus)), -1));
     }
@@ -429,7 +430,7 @@ static int Jim_ExecCmd(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
         /* The return value is a list of the pids */
         listObj = Jim_NewListObj(interp, NULL, 0);
         for (i = 0; i < numPids; i++) {
-            Jim_ListAppendElement(interp, listObj, Jim_NewIntObj(interp, (long)pidPtr[i]));
+            Jim_ListAppendElement(interp, listObj, Jim_NewIntObj(interp, (jim_wide)pidPtr[i]));
         }
         Jim_SetResult(interp, listObj);
         JimDetachPids(interp, numPids, pidPtr);
@@ -1294,7 +1295,7 @@ static int JimReadFd(fdtype fd, char *buffer, size_t len)
 
 static FILE *JimFdOpenForRead(fdtype fd)
 {
-    return _fdopen(_open_osfhandle((int)fd, _O_RDONLY | _O_TEXT), "r");
+    return _fdopen(_open_osfhandle((intptr_t)fd, _O_RDONLY | _O_TEXT), "r");
 }
 
 static fdtype JimFileno(FILE *fh)
@@ -1316,7 +1317,7 @@ static fdtype JimOpenForWrite(const char *filename, int append)
 
 static FILE *JimFdOpenForWrite(fdtype fd)
 {
-    return _fdopen(_open_osfhandle((int)fd, _O_TEXT), "w");
+    return _fdopen(_open_osfhandle((intptr_t)fd, _O_TEXT), "w");
 }
 
 static pidtype JimWaitPid(pidtype pid, int *status, int nohang)
@@ -1437,7 +1438,7 @@ JimWinBuildCommandLine(Jim_Interp *interp, char **argv)
         for (special = argv[i]; ; ) {
             if ((*special == '\\') && (special[1] == '\\' ||
                     special[1] == '"' || (quote && special[1] == '\0'))) {
-                Jim_AppendString(interp, strObj, start, special - start);
+                Jim_AppendString(interp, strObj, start, (int)(special - start));
                 start = special;
                 while (1) {
                     special++;
@@ -1447,14 +1448,14 @@ JimWinBuildCommandLine(Jim_Interp *interp, char **argv)
                          * N * 2 + 1 backslashes then a quote.
                          */
 
-                        Jim_AppendString(interp, strObj, start, special - start);
+                        Jim_AppendString(interp, strObj, start, (int)(special - start));
                         break;
                     }
                     if (*special != '\\') {
                         break;
                     }
                 }
-                Jim_AppendString(interp, strObj, start, special - start);
+                Jim_AppendString(interp, strObj, start, (int)(special - start));
                 start = special;
             }
             if (*special == '"') {
@@ -1462,7 +1463,7 @@ JimWinBuildCommandLine(Jim_Interp *interp, char **argv)
             Jim_AppendString(interp, strObj, "\"", 1);
         }
         else {
-            Jim_AppendString(interp, strObj, start, special - start);
+            Jim_AppendString(interp, strObj, start, (int)(special - start));
         }
                 Jim_AppendString(interp, strObj, "\\\"", 2);
                 start = special + 1;
@@ -1472,7 +1473,7 @@ JimWinBuildCommandLine(Jim_Interp *interp, char **argv)
             }
             special++;
         }
-        Jim_AppendString(interp, strObj, start, special - start);
+        Jim_AppendString(interp, strObj, start, (int)(special - start));
         if (quote) {
             Jim_AppendString(interp, strObj, "\"", 1);
         }
