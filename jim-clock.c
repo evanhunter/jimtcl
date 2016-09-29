@@ -9,6 +9,11 @@
 #define _XOPEN_SOURCE 500
 #endif
 
+/* for localtime_r & gmtime_r */
+#ifndef _POSIX_SOURCE
+#define _POSIX_SOURCE
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -26,24 +31,105 @@ static int clock_cmd_format(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     /* How big is big enough? */
     char buf[100];
     time_t t;
-    long seconds;
-
+	int i;
+	jim_wide seconds;
+	enum {
+		FORMAT_OPT_FORMAT, FORMAT_OPT_GMT, FORMAT_OPT_LOCALE, FORMAT_OPT_BASE, FORMAT_OPT_TIMEZONE
+	};
+	static const char * const options[] = {
+		"-format", "-gmt", "-locale", "-base", "-timezone", NULL
+	};
     const char *format = "%a %b %d %H:%M:%S %Z %Y";
+	const char *locale = "";
+	const char *timzone = "";
+	jim_wide base = 0;
 
-    if (argc == 2 || (argc == 3 && !Jim_CompareStringImmediate(interp, argv[1], "-format"))) {
-        return -1;
-    }
+	int gmt = 0;
 
-    if (argc == 3) {
-        format = Jim_String(argv[2]);
-    }
+	if (argc < 1) {
+		goto wrongNumArgs;
+	}
 
-    if (Jim_GetLong(interp, argv[0], &seconds) != JIM_OK) {
+	for (i = 1; i < argc; i++) {
+		const char *opt = Jim_String(argv[i]);
+		int option;
+
+		if (*opt != '-') {
+			Jim_SetResultFormatted(interp, "Unknown trailing data \"%#s\"", argv[i]);
+			return JIM_ERR;
+		}
+		if (Jim_GetEnum(interp, argv[i], options, &option, "format", JIM_ERRMSG) != JIM_OK) {
+			return JIM_ERR;
+		}
+		switch (option) {
+		case FORMAT_OPT_FORMAT:
+			if (++i == argc) {
+				goto wrongNumArgs;
+			}
+			format = Jim_String(argv[i]);
+			break;
+
+		case FORMAT_OPT_GMT: {
+				if (++i == argc) {
+					goto wrongNumArgs;
+				}
+				if (Jim_GetBoolean(interp, argv[i], &gmt) != JIM_OK) {
+					Jim_SetResultFormatted(interp, "-gmt argument \"%#s\" is not a boolean value", argv[i]);
+					return JIM_ERR;
+				}
+			}
+			break;
+
+		case FORMAT_OPT_LOCALE:
+			if (++i == argc) {
+				goto wrongNumArgs;
+			}
+			locale = Jim_String(argv[i]);
+			/* Currently unused */
+			break;
+
+		case FORMAT_OPT_BASE: {
+				if (++i == argc) {
+					goto wrongNumArgs;
+				}
+				if (Jim_GetWide(interp, argv[i], &base) != JIM_OK) {
+					Jim_SetResultFormatted(interp, "-base argument \"%#s\" is not a wide integer", argv[i]);
+					return JIM_ERR;
+				}
+				/* Currently unused */
+			}
+			break;
+
+		case FORMAT_OPT_TIMEZONE:
+			if (++i == argc) {
+				goto wrongNumArgs;
+			}
+			timzone = Jim_String(argv[i]);
+			/* Currently unused */
+			break;
+		}
+	}
+
+    if (Jim_GetWide(interp, argv[0], &seconds) != JIM_OK) {
         return JIM_ERR;
     }
     t = seconds;
 
-    if (strftime(buf, sizeof(buf), format, localtime(&t)) == 0) {
+	struct tm tm_value;
+	struct tm *tm_ptr;
+	if (gmt) {
+		tm_ptr = gmtime_r(&t, &tm_value);
+	}
+	else {
+		tm_ptr = localtime_r(&t, &tm_value);
+	}
+
+	if (tm_ptr == NULL) {
+		Jim_SetResultString(interp, "Error converting numeric to time", -1);
+		return JIM_ERR;
+	}
+
+    if (strftime(buf, sizeof(buf), format, &tm_value) == 0) {
         Jim_SetResultString(interp, "format string too long", -1);
         return JIM_ERR;
     }
@@ -51,6 +137,12 @@ static int clock_cmd_format(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
     Jim_SetResultString(interp, buf, -1);
 
     return JIM_OK;
+
+
+wrongNumArgs:
+	Jim_WrongNumArgs(interp, 1, argv,
+		"?-switch ...? exp string ?matchVar? ?subMatchVar ...?");
+	return JIM_ERR;
 }
 
 #ifdef HAVE_STRPTIME
@@ -142,7 +234,7 @@ static const jim_subcmd_type clock_command_table[] = {
         "seconds ?-format format?",
         clock_cmd_format,
         1,
-        3,
+		-1,
         /* Description: Format the given time */
     },
 #ifdef HAVE_STRPTIME
