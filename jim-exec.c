@@ -976,7 +976,7 @@ badargs:
             outputId = pipeIds[1];
         }
 
-        /* Need to do this befor vfork() */
+        /* Need to do this before vfork() */
         if (pipe_dup_err) {
             errorId = outputId;
         }
@@ -1017,7 +1017,20 @@ badargs:
 
             /* Need to prep an error message before vfork(), just in case */
             fprintf(stderr, "couldn't exec \"%s\"\n", arg_array[firstArg]);
+#ifdef CI_TEST
+            /* Valgrind views this path as causing a large number of memory leaks
+             * This is because the forked child process has all the same malloc blocks
+             * as the parent, but in this path, it just exits with the blocks still
+             * reachable.
+             * This dummy exec command causes the child process to be replaced with
+             * the 'false' process and Valgrind does not see leaks. The 'false' exec
+             * preserves the non-zero exit code
+             */
+            char *const x[] = {"false", "",(char *const)NULL};
+            execvp(x[0],x);
+#else
             _exit(127);
+#endif
         }
 #endif
 
