@@ -115,6 +115,18 @@ uninstall:
 test check: $(JIMSH)
 	cd @srcdir@/tests; $(DEF_LD_PATH) $(MAKE) jimsh=@builddir@/jimsh TOPSRCDIR=@top_srcdir@
 
+@if JIM_COVERAGE
+coverage: test
+	lcov -c -d . -o lcov.txt
+	genhtml -o coverage_html lcov.txt
+
+@else
+coverage:
+	echo "Coverage requires configuring with --coverage option." && false
+
+@endif
+
+
 $(OBJS): Makefile $(wildcard *.h)
 
 @if JIM_UTF8
@@ -206,7 +218,7 @@ Tcl.html: jim_tcl.txt
 	@tclsh@ @srcdir@/make-index $> $^ | asciidoc -o $@ -d manpage - || cp @srcdir@/Tcl_shipped.html Tcl.html
 
 clean:
-	rm -f *.o *.so *.dll *.exe lib*.a $(JIMSH) $(LIBJIM) Tcl.html _*.c
+	rm -rf *.o *.so *.dll *.exe lib*.a $(JIMSH) $(LIBJIM) Tcl.html _*.c *.gcda *.gcno coverage_html lcov.txt
 
 distclean: clean
 	rm -f jimautoconf.h jim-config.h Makefile config.log @srcdir@/autosetup/jimsh0@EXEEXT@ build-jim-ext

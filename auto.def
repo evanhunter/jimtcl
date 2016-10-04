@@ -21,6 +21,7 @@ options {
     docs=1          => "don't build or install the documentation"
     docdir:path     => "path to install docs (if built)"
     random-hash	    => "randomise hash tables. more secure but hash table results are not predicable"
+    coverage        => "Enable gcov/lcov code coverage arcs"
     with-jim-ext: {with-ext:"ext1 ext2 ..."} => {
         Specify additional jim extensions to include.
         These are enabled by default:
@@ -195,6 +196,16 @@ if {[opt-bool maintainer]} {
     msg-result "Enabling maintainer settings"
     define JIM_MAINTAINER
 }
+
+if {[opt-bool coverage]} {
+    msg-result "Enabling Code Coverage settings"
+    define-append CCOPTS  "--coverage"
+    define-append LDFLAGS "--coverage"
+    cc-check-progs lcov
+    cc-check-progs genhtml
+    define JIM_COVERAGE true
+}
+
 # If --math or --full and not --disable-math
 if {[opt-bool-or-full math]} {
     msg-result "Enabling math functions"
