@@ -1,3 +1,4 @@
+
 config.log
 tags
 /Makefile
@@ -19,3 +20,11 @@ libjim.a
 configure.gnu
 jimsh0
 build-jim-ext
+*.gcda
+*.gcno
+coverage_html/
+lcov.txt
+mk/
+*.so
+install/
+alternate/
