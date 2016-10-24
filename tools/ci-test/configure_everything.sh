@@ -128,7 +128,7 @@ $WRAPPER_COMMAND \
                    --full \
                    --ssl \
                    --maintainer \
-                   --with-ext="sqlite3 zlib readline mk nshelper rlprompt $SDL" \
+                   --with-ext="sqlite3 zlib readline mk nshelper rlprompt $SDL ffi" \
                    --random-hash \
                    $PREFIX \
                    CFLAGS="$CFLAGS \
